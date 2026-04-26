@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <iostream>
 #include <string>
 #include <CLI/CLI.hpp>
@@ -13,6 +13,7 @@ namespace MyGrep {
     struct CommandLineOptions {
         string pattern;
         string filePath;
+        bool matchWholeLine{false};
         VisualizationMode visualizationMode{VisualizationMode::None};
     };
 
@@ -26,6 +27,7 @@ namespace MyGrep {
         CommandLineOptions options;
         app.add_option("regex", options.pattern, "regular expression")->required();
         app.add_option("file", options.filePath, "file path")->required()->check(ExistingFile);
+        app.add_flag("-x,--line-regexp", options.matchWholeLine, "match only whole lines");
         string visualizationModeStr;
         app.add_option("-v,--visualize", visualizationModeStr, "visualize regex automaton")->option_text("{NFA,DFA,MINDFA}");
         if (visualizationModeStr == "NFA") options.visualizationMode = VisualizationMode::NFA;

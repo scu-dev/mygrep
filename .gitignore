@@ -24,12 +24,3 @@ build/
 out/
 !*/out/
 cmake-build-*/
-
-# Test-purpose files/folders
-saves/
-!*/saves/
-packs/
-!*/packs/
-tests/
-!*/tests/
-/settings.json

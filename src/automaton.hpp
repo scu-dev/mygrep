@@ -9,84 +9,69 @@
 #include <vector>
 
 namespace MyGrep {
-    using std::array, std::string, std::vector;
-
-    using u64 = std::uint64_t;
-
-    namespace detail {
-        inline string error;
-        inline constexpr u64 invalidState = std::numeric_limits<u64>::max();
-    }
-
-    [[nodiscard]] inline string getLastParserError() noexcept { return detail::error; }
-
-    struct AutomatonNode {
-        array<u64, 256> transitions;
-        bool accepting{false};
-
-        AutomatonNode() noexcept {
-            transitions.fill(detail::invalidState);
-        }
-    };
+    typedef uint8_t u8;
+    typedef uint64_t u64;
+    using std::array, std::string, std::vector, std::numeric_limits, std::map, std::sort, std::binary_search, std::size_t;
 
     struct Automaton {
-        vector<AutomatonNode> nodes;
-        u64 state{0};
+        vector<array<u64, 256>> transitions;
+        vector<u8> accepting;
         u64 startState{0};
-
-        inline void reset() noexcept {
-            state = startState;
-        }
-
-        [[nodiscard]] inline bool isAccepting() const noexcept {
-            return state < nodes.size() && nodes[state].accepting;
-        }
-
-        [[nodiscard]] inline bool traverse(char c) noexcept {
-            if (state >= nodes.size()) return false;
-            const u64 nextState = nodes[state].transitions[static_cast<unsigned char>(c)];
-            if (nextState == detail::invalidState) return false;
-            state = nextState;
-            return true;
-        }
     };
 
     namespace detail {
+        inline const char* error = "";
+        inline constexpr u64 invalidState = numeric_limits<u64>::max();
+
         enum struct TokenKind {
-            Literal,
-            LeftParen,
-            RightParen,
-            Alternation,
-            Star,
+            Literal, LeftParen, RightParen, Alternation, Star,
             Concat
         };
 
         struct Token {
             TokenKind kind{TokenKind::Literal};
-            unsigned char value{0};
+            u8 value{0};
         };
 
         struct NfaNode {
             array<vector<u64>, 256> transitions;
             vector<u64> epsilonTransitions;
-
-            [[nodiscard]] inline bool traverse(unsigned char c, vector<u64>& result) const {
-                const auto oldSize = result.size();
-                result.insert(result.end(), transitions[c].begin(), transitions[c].end());
-                return result.size() != oldSize;
-            }
-
-            [[nodiscard]] inline bool traverseEpsilon(vector<u64>& result) const {
-                const auto oldSize = result.size();
-                result.insert(result.end(), epsilonTransitions.begin(), epsilonTransitions.end());
-                return result.size() != oldSize;
-            }
         };
 
         struct NfaFragment {
             u64 start{invalidState};
             u64 accept{invalidState};
         };
+
+        [[nodiscard]] inline array<u64, 256> makeTransitionTable() noexcept {
+            array<u64, 256> transitions;
+            transitions.fill(invalidState);
+            return transitions;
+        }
+
+        [[nodiscard]] inline bool traverse(const Automaton& automaton, u64& state, u8 c) noexcept {
+            if (state >= automaton.transitions.size()) return false;
+            const u64 nextState = automaton.transitions[state][c];
+            if (nextState == invalidState) return false;
+            state = nextState;
+            return true;
+        }
+
+        [[nodiscard]] inline bool isAccepting(const Automaton& automaton, u64 state) noexcept {
+            return state < automaton.accepting.size() && static_cast<bool>(automaton.accepting[state]);
+        }
+
+        [[nodiscard]] inline bool traverse(const NfaNode& node, u8 c, vector<u64>& result) noexcept {
+            const auto oldSize = result.size();
+            result.insert(result.end(), node.transitions[c].begin(), node.transitions[c].end());
+            return result.size() != oldSize;
+        }
+
+        [[nodiscard]] inline bool traverseEpsilon(const NfaNode& node, vector<u64>& result) noexcept {
+            const auto oldSize = result.size();
+            result.insert(result.end(), node.epsilonTransitions.begin(), node.epsilonTransitions.end());
+            return result.size() != oldSize;
+        }
 
         [[nodiscard]] inline bool canEndExpression(TokenKind kind) noexcept {
             return kind == TokenKind::Literal || kind == TokenKind::RightParen || kind == TokenKind::Star;
@@ -106,18 +91,18 @@ namespace MyGrep {
             return 0;
         }
 
-        inline void setError(const string& message) {
+        inline void setError(const char* message) noexcept {
             error = message;
         }
 
-        [[nodiscard]] inline bool tokenize(const string& pattern, vector<Token>& tokens) {
+        [[nodiscard]] inline bool tokenize(const string& pattern, vector<Token>& tokens) noexcept {
             tokens.clear();
             u64 openParens = 0;
             bool havePrevious = false;
             TokenKind previousKind = TokenKind::Alternation;
 
-            for (char raw : pattern) {
-                Token token{TokenKind::Literal, static_cast<unsigned char>(raw)};
+            for (u8 raw : pattern) {
+                Token token{TokenKind::Literal, raw};
                 if (raw == '(') token.kind = TokenKind::LeftParen;
                 else if (raw == ')') token.kind = TokenKind::RightParen;
                 else if (raw == '|') token.kind = TokenKind::Alternation;
@@ -153,7 +138,7 @@ namespace MyGrep {
                     tokens.push_back({TokenKind::Concat, 0});
                 }
 
-                if (token.kind == TokenKind::LeftParen) ++openParens;
+                if (token.kind == TokenKind::LeftParen) openParens++;
                 tokens.push_back(token);
                 previousKind = token.kind;
                 havePrevious = true;
@@ -170,7 +155,7 @@ namespace MyGrep {
             return true;
         }
 
-        [[nodiscard]] inline bool toPostfix(const vector<Token>& tokens, vector<Token>& postfix) {
+        [[nodiscard]] inline bool toPostfix(const vector<Token>& tokens, vector<Token>& postfix) noexcept {
             postfix.clear();
             vector<Token> operators;
 
@@ -210,13 +195,12 @@ namespace MyGrep {
             return true;
         }
 
-        [[nodiscard]] inline u64 addNfaNode(vector<NfaNode>& nodes) {
+        [[nodiscard]] inline u64 addNfaNode(vector<NfaNode>& nodes) noexcept {
             nodes.emplace_back();
             return static_cast<u64>(nodes.size() - 1);
         }
 
-        [[nodiscard]] inline bool buildNfa(const vector<Token>& postfix, vector<NfaNode>& nodes, NfaFragment& result,
-                                           array<bool, 256>& alphabet) {
+        [[nodiscard]] inline bool buildNfa(const vector<Token>& postfix, vector<NfaNode>& nodes, NfaFragment& result, array<bool, 256>& alphabet) noexcept {
             nodes.clear();
             alphabet.fill(false);
             vector<NfaFragment> fragments;
@@ -280,14 +264,14 @@ namespace MyGrep {
             return true;
         }
 
-        [[nodiscard]] inline vector<u64> epsilonClosure(const vector<NfaNode>& nodes, const vector<u64>& states) {
-            vector<bool> visited(nodes.size(), false);
+        [[nodiscard]] inline vector<u64> epsilonClosure(const vector<NfaNode>& nodes, const vector<u64>& states) noexcept {
+            vector<u8> visited(nodes.size(), 0);
             vector<u64> closure;
             vector<u64> stack;
 
             for (u64 state : states) {
-                if (state >= nodes.size() || visited[state]) continue;
-                visited[state] = true;
+                if (state >= nodes.size() || static_cast<bool>(visited[state])) continue;
+                visited[state] = 1;
                 closure.push_back(state);
                 stack.push_back(state);
             }
@@ -296,42 +280,40 @@ namespace MyGrep {
                 const u64 state = stack.back();
                 stack.pop_back();
                 vector<u64> nextStates;
-                (void)nodes[state].traverseEpsilon(nextStates);
+                static_cast<void>(traverseEpsilon(nodes[state], nextStates));
                 for (u64 nextState : nextStates) {
-                    if (nextState >= nodes.size() || visited[nextState]) continue;
-                    visited[nextState] = true;
+                    if (nextState >= nodes.size() || static_cast<bool>(visited[nextState])) continue;
+                    visited[nextState] = 1;
                     closure.push_back(nextState);
                     stack.push_back(nextState);
                 }
             }
 
-            std::sort(closure.begin(), closure.end());
+            sort(closure.begin(), closure.end());
             return closure;
         }
 
-        [[nodiscard]] inline vector<u64> moveOnCharacter(const vector<NfaNode>& nodes, const vector<u64>& states,
-                                                         unsigned char c) {
+        [[nodiscard]] inline vector<u64> moveOnCharacter(const vector<NfaNode>& nodes, const vector<u64>& states, u8 c) noexcept {
             vector<u64> moved;
             for (u64 state : states) {
                 if (state >= nodes.size()) continue;
-                (void)nodes[state].traverse(c, moved);
+                static_cast<void>(traverse(nodes[state], c, moved));
             }
             return moved;
         }
 
         [[nodiscard]] inline bool containsState(const vector<u64>& states, u64 state) noexcept {
-            return std::binary_search(states.begin(), states.end(), state);
+            return binary_search(states.begin(), states.end(), state);
         }
 
-        [[nodiscard]] inline Automaton buildEmptyAutomaton() {
+        [[nodiscard]] inline Automaton buildEmptyAutomaton() noexcept {
             Automaton automaton;
-            automaton.nodes.emplace_back();
-            automaton.nodes[0].accepting = true;
+            automaton.transitions.push_back(makeTransitionTable());
+            automaton.accepting.push_back(1);
             return automaton;
         }
 
-        [[nodiscard]] inline bool buildDfa(const vector<NfaNode>& nfaNodes, u64 nfaStart, u64 nfaAccept,
-                                           const array<bool, 256>& alphabet, Automaton& result) {
+        [[nodiscard]] inline bool buildDfa(const vector<NfaNode>& nfaNodes, u64 nfaStart, u64 nfaAccept, const array<bool, 256>& alphabet, Automaton& result) noexcept {
             result = Automaton{};
             vector<u64> startStates{nfaStart};
             vector<u64> startClosure = epsilonClosure(nfaNodes, startStates);
@@ -340,14 +322,14 @@ namespace MyGrep {
                 return false;
             }
 
-            std::map<vector<u64>, u64> dfaStateByNfaStates;
+            map<vector<u64>, u64> dfaStateByNfaStates;
             vector<vector<u64>> pendingStates;
             dfaStateByNfaStates.emplace(startClosure, 0);
             pendingStates.push_back(startClosure);
-            result.nodes.emplace_back();
-            result.nodes[0].accepting = containsState(startClosure, nfaAccept);
+            result.transitions.push_back(makeTransitionTable());
+            result.accepting.push_back(static_cast<u8>(containsState(startClosure, nfaAccept)));
 
-            for (std::size_t pendingIndex = 0; pendingIndex < pendingStates.size(); ++pendingIndex) {
+            for (size_t pendingIndex = 0; pendingIndex < pendingStates.size(); pendingIndex++) {
                 const vector<u64> currentStates = pendingStates[pendingIndex];
                 const auto currentIt = dfaStateByNfaStates.find(currentStates);
                 if (currentIt == dfaStateByNfaStates.end()) {
@@ -356,9 +338,9 @@ namespace MyGrep {
                 }
                 const u64 currentDfaState = currentIt->second;
 
-                for (std::size_t symbol = 0; symbol < alphabet.size(); ++symbol) {
+                for (size_t symbol = 0; symbol < alphabet.size(); symbol++) {
                     if (!alphabet[symbol]) continue;
-                    vector<u64> movedStates = moveOnCharacter(nfaNodes, currentStates, static_cast<unsigned char>(symbol));
+                    vector<u64> movedStates = moveOnCharacter(nfaNodes, currentStates, static_cast<u8>(symbol));
                     if (movedStates.empty()) continue;
                     vector<u64> targetStates = epsilonClosure(nfaNodes, movedStates);
                     if (targetStates.empty()) continue;
@@ -366,49 +348,65 @@ namespace MyGrep {
                     u64 targetDfaState = invalidState;
                     const auto targetIt = dfaStateByNfaStates.find(targetStates);
                     if (targetIt == dfaStateByNfaStates.end()) {
-                        targetDfaState = static_cast<u64>(result.nodes.size());
+                        targetDfaState = static_cast<u64>(result.transitions.size());
                         dfaStateByNfaStates.emplace(targetStates, targetDfaState);
                         pendingStates.push_back(targetStates);
-                        result.nodes.emplace_back();
-                        result.nodes.back().accepting = containsState(targetStates, nfaAccept);
+                        result.transitions.push_back(makeTransitionTable());
+                        result.accepting.push_back(static_cast<u8>(containsState(targetStates, nfaAccept)));
                     } else {
                         targetDfaState = targetIt->second;
                     }
-                    result.nodes[currentDfaState].transitions[symbol] = targetDfaState;
+                    result.transitions[currentDfaState][symbol] = targetDfaState;
                 }
             }
 
             result.startState = 0;
-            result.state = result.startState;
             return true;
         }
     }
 
     [[nodiscard]] inline bool buildAutomaton(const string& pattern, Automaton& result) noexcept {
         result = Automaton{};
-        detail::error.clear();
+        detail::error = "";
 
-        try {
-            vector<detail::Token> tokens;
-            if (!detail::tokenize(pattern, tokens)) return false;
-            if (tokens.empty()) {
-                result = detail::buildEmptyAutomaton();
-                return true;
-            }
-
-            vector<detail::Token> postfix;
-            if (!detail::toPostfix(tokens, postfix)) return false;
-
-            vector<detail::NfaNode> nfaNodes;
-            detail::NfaFragment nfaFragment;
-            array<bool, 256> alphabet;
-            if (!detail::buildNfa(postfix, nfaNodes, nfaFragment, alphabet)) return false;
-            if (!detail::buildDfa(nfaNodes, nfaFragment.start, nfaFragment.accept, alphabet, result)) return false;
+        vector<detail::Token> tokens;
+        if (!detail::tokenize(pattern, tokens)) return false;
+        if (tokens.empty()) {
+            result = detail::buildEmptyAutomaton();
             return true;
-        } catch (...) {
-            result = Automaton{};
-            detail::setError("failed to build automaton");
-            return false;
         }
+
+        vector<detail::Token> postfix;
+        if (!detail::toPostfix(tokens, postfix)) return false;
+
+        vector<detail::NfaNode> nfaNodes;
+        detail::NfaFragment nfaFragment;
+        array<bool, 256> alphabet;
+        if (!detail::buildNfa(postfix, nfaNodes, nfaFragment, alphabet)) return false;
+        if (!detail::buildDfa(nfaNodes, nfaFragment.start, nfaFragment.accept, alphabet, result)) return false;
+        return true;
+    }
+
+    [[nodiscard]] inline bool match(const string& line, const Automaton& automaton, bool wholeLine = false) noexcept {
+        if (automaton.startState >= automaton.transitions.size()) return false;
+
+        if (wholeLine) {
+            u64 state = automaton.startState;
+            for (size_t index = 0; index < line.size(); index++) {
+                if (!detail::traverse(automaton, state, static_cast<u8>(line[index]))) return false;
+            }
+            return detail::isAccepting(automaton, state);
+        }
+
+        for (size_t start = 0; start <= line.size(); start++) {
+            u64 state = automaton.startState;
+            if (detail::isAccepting(automaton, state)) return true;
+
+            for (size_t index = start; index < line.size(); index++) {
+                if (!detail::traverse(automaton, state, static_cast<u8>(line[index]))) break;
+                if (detail::isAccepting(automaton, state)) return true;
+            }
+        }
+        return false;
     }
 }
