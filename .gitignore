@@ -1,0 +1,35 @@
+# OS artifacts
+.DS_Store
+Thumbs.db
+[Dd]esktop.ini
+
+# Build system/IDE generated files/folders
+.vscode/
+.vs/
+.VSCodeCounter/
+*.suo
+*.user
+*.VC.db
+cpp.hint
+.idea/
+*.iws
+*.iml
+*.ipr
+.netrwhist
+.vimcache
+.cache
+/compile_commands.json
+build/
+!*/build/
+out/
+!*/out/
+cmake-build-*/
+
+# Test-purpose files/folders
+saves/
+!*/saves/
+packs/
+!*/packs/
+tests/
+!*/tests/
+/settings.json

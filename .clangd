@@ -1,0 +1,11 @@
+CompileFlags:
+  Add:
+    - -xc++
+    - -Xclang
+    - -std=c++26
+    - -Wno-unqualified-std-cast-call
+    - -Wno-c++17-extensions
+Diagnostics:
+  Suppress:
+    - exceptions_disabled
+    - unqualified-std-cast-call
