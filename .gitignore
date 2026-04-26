@@ -27,3 +27,4 @@ cmake-build-*/
 
 others/
 !*/others/
+tests/visualization-out/

@@ -33,12 +33,19 @@ namespace MyGrep {
             u8 value{0};
         };
 
-        struct NfaNode {
+        struct NFANode {
             array<vector<u64>, 256> transitions;
             vector<u64> epsilonTransitions;
         };
 
-        struct NfaFragment {
+        struct NFA {
+            vector<NFANode> nodes;
+            array<bool, 256> alphabet{};
+            u64 startState{invalidState};
+            u64 acceptState{invalidState};
+        };
+
+        struct NFAFragment {
             u64 start{invalidState};
             u64 accept{invalidState};
         };
@@ -61,13 +68,13 @@ namespace MyGrep {
             return state < automaton.accepting.size() && static_cast<bool>(automaton.accepting[state]);
         }
 
-        [[nodiscard]] inline bool traverse(const NfaNode& node, u8 c, vector<u64>& result) noexcept {
+        [[nodiscard]] inline bool traverse(const NFANode& node, u8 c, vector<u64>& result) noexcept {
             const auto oldSize = result.size();
             result.insert(result.end(), node.transitions[c].begin(), node.transitions[c].end());
             return result.size() != oldSize;
         }
 
-        [[nodiscard]] inline bool traverseEpsilon(const NfaNode& node, vector<u64>& result) noexcept {
+        [[nodiscard]] inline bool traverseEpsilon(const NFANode& node, vector<u64>& result) noexcept {
             const auto oldSize = result.size();
             result.insert(result.end(), node.epsilonTransitions.begin(), node.epsilonTransitions.end());
             return result.size() != oldSize;
@@ -195,76 +202,96 @@ namespace MyGrep {
             return true;
         }
 
-        [[nodiscard]] inline u64 addNfaNode(vector<NfaNode>& nodes) noexcept {
-            nodes.emplace_back();
-            return static_cast<u64>(nodes.size() - 1);
+        [[nodiscard]] inline u64 addNFANode(NFA& nfa) noexcept {
+            nfa.nodes.emplace_back();
+            return static_cast<u64>(nfa.nodes.size() - 1);
         }
 
-        [[nodiscard]] inline bool buildNfa(const vector<Token>& postfix, vector<NfaNode>& nodes, NfaFragment& result, array<bool, 256>& alphabet) noexcept {
-            nodes.clear();
-            alphabet.fill(false);
-            vector<NfaFragment> fragments;
+        [[nodiscard]] inline bool failBuildNFA(NFA& nfa, const char* message) noexcept {
+            nfa = NFA{};
+            setError(message);
+            return false;
+        }
+
+        [[nodiscard]] inline bool buildNFAFromPostfix(const vector<Token>& postfix, NFA& result) noexcept {
+            result = NFA{};
+            vector<NFAFragment> fragments;
 
             for (const Token& token : postfix) {
                 if (token.kind == TokenKind::Literal) {
-                    const u64 start = addNfaNode(nodes);
-                    const u64 accept = addNfaNode(nodes);
-                    nodes[start].transitions[token.value].push_back(accept);
-                    alphabet[token.value] = true;
+                    const u64 start = addNFANode(result);
+                    const u64 accept = addNFANode(result);
+                    result.nodes[start].transitions[token.value].push_back(accept);
+                    result.alphabet[token.value] = true;
                     fragments.push_back({start, accept});
                 } else if (token.kind == TokenKind::Star) {
                     if (fragments.empty()) {
-                        setError("'*' missing operand");
-                        return false;
+                        return failBuildNFA(result, "'*' missing operand");
                     }
-                    const NfaFragment child = fragments.back();
+                    const NFAFragment child = fragments.back();
                     fragments.pop_back();
-                    const u64 start = addNfaNode(nodes);
-                    const u64 accept = addNfaNode(nodes);
-                    nodes[start].epsilonTransitions.push_back(child.start);
-                    nodes[start].epsilonTransitions.push_back(accept);
-                    nodes[child.accept].epsilonTransitions.push_back(child.start);
-                    nodes[child.accept].epsilonTransitions.push_back(accept);
+                    const u64 start = addNFANode(result);
+                    const u64 accept = addNFANode(result);
+                    result.nodes[start].epsilonTransitions.push_back(child.start);
+                    result.nodes[start].epsilonTransitions.push_back(accept);
+                    result.nodes[child.accept].epsilonTransitions.push_back(child.start);
+                    result.nodes[child.accept].epsilonTransitions.push_back(accept);
                     fragments.push_back({start, accept});
                 } else if (token.kind == TokenKind::Concat) {
                     if (fragments.size() < 2) {
-                        setError("concatenation missing operand");
-                        return false;
+                        return failBuildNFA(result, "concatenation missing operand");
                     }
-                    const NfaFragment right = fragments.back();
+                    const NFAFragment right = fragments.back();
                     fragments.pop_back();
-                    const NfaFragment left = fragments.back();
+                    const NFAFragment left = fragments.back();
                     fragments.pop_back();
-                    nodes[left.accept].epsilonTransitions.push_back(right.start);
+                    result.nodes[left.accept].epsilonTransitions.push_back(right.start);
                     fragments.push_back({left.start, right.accept});
                 } else if (token.kind == TokenKind::Alternation) {
                     if (fragments.size() < 2) {
-                        setError("alternation missing operand");
-                        return false;
+                        return failBuildNFA(result, "alternation missing operand");
                     }
-                    const NfaFragment right = fragments.back();
+                    const NFAFragment right = fragments.back();
                     fragments.pop_back();
-                    const NfaFragment left = fragments.back();
+                    const NFAFragment left = fragments.back();
                     fragments.pop_back();
-                    const u64 start = addNfaNode(nodes);
-                    const u64 accept = addNfaNode(nodes);
-                    nodes[start].epsilonTransitions.push_back(left.start);
-                    nodes[start].epsilonTransitions.push_back(right.start);
-                    nodes[left.accept].epsilonTransitions.push_back(accept);
-                    nodes[right.accept].epsilonTransitions.push_back(accept);
+                    const u64 start = addNFANode(result);
+                    const u64 accept = addNFANode(result);
+                    result.nodes[start].epsilonTransitions.push_back(left.start);
+                    result.nodes[start].epsilonTransitions.push_back(right.start);
+                    result.nodes[left.accept].epsilonTransitions.push_back(accept);
+                    result.nodes[right.accept].epsilonTransitions.push_back(accept);
                     fragments.push_back({start, accept});
                 }
             }
 
             if (fragments.size() != 1) {
-                setError("invalid regular expression");
-                return false;
+                return failBuildNFA(result, "invalid regular expression");
             }
-            result = fragments.back();
+            result.startState = fragments.back().start;
+            result.acceptState = fragments.back().accept;
             return true;
         }
 
-        [[nodiscard]] inline vector<u64> epsilonClosure(const vector<NfaNode>& nodes, const vector<u64>& states) noexcept {
+        [[nodiscard]] inline bool buildNFAFromPattern(const string& pattern, NFA& result) noexcept {
+            result = NFA{};
+            error = "";
+
+            vector<Token> tokens;
+            if (!tokenize(pattern, tokens)) return false;
+            if (tokens.empty()) {
+                const u64 state = addNFANode(result);
+                result.startState = state;
+                result.acceptState = state;
+                return true;
+            }
+
+            vector<Token> postfix;
+            if (!toPostfix(tokens, postfix)) return false;
+            return buildNFAFromPostfix(postfix, result);
+        }
+
+        [[nodiscard]] inline vector<u64> epsilonClosure(const vector<NFANode>& nodes, const vector<u64>& states) noexcept {
             vector<u8> visited(nodes.size(), 0);
             vector<u64> closure;
             vector<u64> stack;
@@ -293,7 +320,7 @@ namespace MyGrep {
             return closure;
         }
 
-        [[nodiscard]] inline vector<u64> moveOnCharacter(const vector<NfaNode>& nodes, const vector<u64>& states, u8 c) noexcept {
+        [[nodiscard]] inline vector<u64> moveOnCharacter(const vector<NFANode>& nodes, const vector<u64>& states, u8 c) noexcept {
             vector<u64> moved;
             for (u64 state : states) {
                 if (state >= nodes.size()) continue;
@@ -306,57 +333,56 @@ namespace MyGrep {
             return binary_search(states.begin(), states.end(), state);
         }
 
-        [[nodiscard]] inline Automaton buildEmptyAutomaton() noexcept {
-            Automaton automaton;
-            automaton.transitions.push_back(makeTransitionTable());
-            automaton.accepting.push_back(1);
-            return automaton;
-        }
-
-        [[nodiscard]] inline bool buildDfa(const vector<NfaNode>& nfaNodes, u64 nfaStart, u64 nfaAccept, const array<bool, 256>& alphabet, Automaton& result) noexcept {
+        [[nodiscard]] inline bool buildDFA(const NFA& nfa, Automaton& result) noexcept {
             result = Automaton{};
-            vector<u64> startStates{nfaStart};
-            vector<u64> startClosure = epsilonClosure(nfaNodes, startStates);
+            error = "";
+            if (nfa.startState >= nfa.nodes.size() || nfa.acceptState >= nfa.nodes.size()) {
+                setError("invalid NFA");
+                return false;
+            }
+
+            vector<u64> startStates{nfa.startState};
+            vector<u64> startClosure = epsilonClosure(nfa.nodes, startStates);
             if (startClosure.empty()) {
                 setError("NFA start state is unreachable");
                 return false;
             }
 
-            map<vector<u64>, u64> dfaStateByNfaStates;
+            map<vector<u64>, u64> dfaStateByNFAStates;
             vector<vector<u64>> pendingStates;
-            dfaStateByNfaStates.emplace(startClosure, 0);
+            dfaStateByNFAStates.emplace(startClosure, 0);
             pendingStates.push_back(startClosure);
             result.transitions.push_back(makeTransitionTable());
-            result.accepting.push_back(static_cast<u8>(containsState(startClosure, nfaAccept)));
+            result.accepting.push_back(static_cast<u8>(containsState(startClosure, nfa.acceptState)));
 
             for (size_t pendingIndex = 0; pendingIndex < pendingStates.size(); pendingIndex++) {
                 const vector<u64> currentStates = pendingStates[pendingIndex];
-                const auto currentIt = dfaStateByNfaStates.find(currentStates);
-                if (currentIt == dfaStateByNfaStates.end()) {
+                const auto currentIt = dfaStateByNFAStates.find(currentStates);
+                if (currentIt == dfaStateByNFAStates.end()) {
                     setError("internal DFA state lookup failed");
                     return false;
                 }
-                const u64 currentDfaState = currentIt->second;
+                const u64 currentDFAState = currentIt->second;
 
-                for (size_t symbol = 0; symbol < alphabet.size(); symbol++) {
-                    if (!alphabet[symbol]) continue;
-                    vector<u64> movedStates = moveOnCharacter(nfaNodes, currentStates, static_cast<u8>(symbol));
+                for (size_t symbol = 0; symbol < nfa.alphabet.size(); symbol++) {
+                    if (!nfa.alphabet[symbol]) continue;
+                    vector<u64> movedStates = moveOnCharacter(nfa.nodes, currentStates, static_cast<u8>(symbol));
                     if (movedStates.empty()) continue;
-                    vector<u64> targetStates = epsilonClosure(nfaNodes, movedStates);
+                    vector<u64> targetStates = epsilonClosure(nfa.nodes, movedStates);
                     if (targetStates.empty()) continue;
 
-                    u64 targetDfaState = invalidState;
-                    const auto targetIt = dfaStateByNfaStates.find(targetStates);
-                    if (targetIt == dfaStateByNfaStates.end()) {
-                        targetDfaState = static_cast<u64>(result.transitions.size());
-                        dfaStateByNfaStates.emplace(targetStates, targetDfaState);
+                    u64 targetDFAState = invalidState;
+                    const auto targetIt = dfaStateByNFAStates.find(targetStates);
+                    if (targetIt == dfaStateByNFAStates.end()) {
+                        targetDFAState = static_cast<u64>(result.transitions.size());
+                        dfaStateByNFAStates.emplace(targetStates, targetDFAState);
                         pendingStates.push_back(targetStates);
                         result.transitions.push_back(makeTransitionTable());
-                        result.accepting.push_back(static_cast<u8>(containsState(targetStates, nfaAccept)));
+                        result.accepting.push_back(static_cast<u8>(containsState(targetStates, nfa.acceptState)));
                     } else {
-                        targetDfaState = targetIt->second;
+                        targetDFAState = targetIt->second;
                     }
-                    result.transitions[currentDfaState][symbol] = targetDfaState;
+                    result.transitions[currentDFAState][symbol] = targetDFAState;
                 }
             }
 
@@ -369,21 +395,9 @@ namespace MyGrep {
         result = Automaton{};
         detail::error = "";
 
-        vector<detail::Token> tokens;
-        if (!detail::tokenize(pattern, tokens)) return false;
-        if (tokens.empty()) {
-            result = detail::buildEmptyAutomaton();
-            return true;
-        }
-
-        vector<detail::Token> postfix;
-        if (!detail::toPostfix(tokens, postfix)) return false;
-
-        vector<detail::NfaNode> nfaNodes;
-        detail::NfaFragment nfaFragment;
-        array<bool, 256> alphabet;
-        if (!detail::buildNfa(postfix, nfaNodes, nfaFragment, alphabet)) return false;
-        if (!detail::buildDfa(nfaNodes, nfaFragment.start, nfaFragment.accept, alphabet, result)) return false;
+        detail::NFA nfa;
+        if (!detail::buildNFAFromPattern(pattern, nfa)) return false;
+        if (!detail::buildDFA(nfa, result)) return false;
         return true;
     }
 
