@@ -24,3 +24,6 @@ build/
 out/
 !*/out/
 cmake-build-*/
+
+others/
+!*/others/

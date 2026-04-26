@@ -26,13 +26,10 @@ namespace MyGrep {
         app.set_help_flag("-h,--help", "Print help message and exit.");
         CommandLineOptions options;
         app.add_option("regex", options.pattern, "regular expression")->required();
-        app.add_option("file", options.filePath, "file path")->required()->check(ExistingFile);
+        app.add_option("file", options.filePath, "input file path; dot output path when -v is present")->required();
         app.add_flag("-x,--line-regexp", options.matchWholeLine, "match only whole lines");
         string visualizationModeStr;
         app.add_option("-v,--visualize", visualizationModeStr, "visualize regex automaton")->option_text("{NFA,DFA,MINDFA}");
-        if (visualizationModeStr == "NFA") options.visualizationMode = VisualizationMode::NFA;
-        else if (visualizationModeStr == "DFA") options.visualizationMode = VisualizationMode::DFA;
-        else if (visualizationModeStr == "MINDFA") options.visualizationMode = VisualizationMode::MinDFA;
         try { app.parse(argc, argv); }
         catch (const CallForHelp&) {
             cout << app.help("", AppFormatMode::All) << endl;
@@ -45,6 +42,20 @@ namespace MyGrep {
         catch (const ParseError& e) {
             cerr << "Error occured during argument parsing: (" << e.get_exit_code() << ") " << e.get_name() << " " << e.what() << endl;
             exit(1);
+        }
+        if (visualizationModeStr == "NFA") options.visualizationMode = VisualizationMode::NFA;
+        else if (visualizationModeStr == "DFA") options.visualizationMode = VisualizationMode::DFA;
+        else if (visualizationModeStr == "MINDFA") options.visualizationMode = VisualizationMode::MinDFA;
+        else if (!visualizationModeStr.empty()) {
+            cerr << "Invalid visualization mode: " << visualizationModeStr << endl;
+            exit(1);
+        }
+        if (options.visualizationMode == VisualizationMode::None) {
+            const string fileError = ExistingFile(options.filePath);
+            if (!fileError.empty()) {
+                cerr << "Invalid input file: " << fileError << endl;
+                exit(1);
+            }
         }
         return options;
     }
